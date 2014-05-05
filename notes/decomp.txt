@@ -1,0 +1,212 @@
+TODO
+====
+formatter rewrite
+  casting to non-ptrs for assignments, to ptrs for fn calls when needed
+    needed for op, load, store, call, la, usefn, li, lui
+    # ...i think?  definitely la and addiu
+  constant embedding
+  local variables for registers
+    elision of unused variables?
+unnecessary register save elision
+unnecessary la/addiu elision
+comment printing?
+re compilation
+
+FUTURE TODO
+===========
+* should probably build cache of type to register mappings, especially because
+  we have to recursively resolve typedefs
+* handle strange offset cases better
+  * e.g. (&arr[idx] + off), despite its rarity
+* eliminate "name" pseudo-type
+* make better use of IDA's own info
+  * opinfo_t, tinfo_t etc. already have the information we need, why wrap them
+    with our own op_ty?
+
+useful IDA functions
+====================
+segs
+  idaapi.getseg
+
+xrefs
+  Dfirst
+  Dnext
+
+disasm
+  GetDisasm
+  GetCurrentLine
+
+data
+  GetManyBytes
+  FindData
+
+etc
+  GetCommentEx
+  GetFunctionCmt
+  is_ret_insn
+  is_call_insn
+  idaapi.get_switch_info_ex
+  calc_switch_cases
+  # how to determine insn is part of switch:
+    nn = idaapi.netnode($' ignore micro')
+    nn.charval(ea, 0) == idaapi.IM_SWITCH (3)
+
+fns
+  # how to get crap from "jal $t9 ; crap":
+    nn = idaapi.netnode('$ mips')
+    nn.altval(ea) - 1
+  GetFrame
+    GetMemberQty
+    GetFirstMember
+    GetStrucNextOff
+    GetStrucId
+    GetMemberId
+    GetMemberName
+    GetMemberSize
+    GetMemberFlag
+
+flags
+  # use isWhatever, don't & flags by hand
+
+types
+  idaapi.print_type2(ea, idaapi.PRTYPE_CPP | idaapi.PRTYPE_SEMI)
+  get_item_head/tinfo/is_array
+
+operands
+  .text:10006350                 addiu   $a1, (aElectropaint - 0x10010000)  # "ElectroPaint"
+  GetOperandValue(ea, 1)
+  cmd = DecodeInstruction(ea)
+  cmd[1].reg is 0 for no reg, a value for a register
+  cmd[1].type is o_imm for immediate, o_displ for register-indexed
+
+arrays
+  idc.ItemSize/idaapi.get_item_size will give size in bytes.  to get length of
+  array:
+
+  (idc.ItemEnd(ea) - idc.ItemHead(ea)) # maybe NextNotTail instead of ItemEnd?
+  / idc.SizeOf(idc.ParseType('float guy;', 0)[1])
+
+decls for testing
+=================
+JUNK_DECLS = '''
+    typedef int (*stupid)(i);
+
+    int time[][2] = { {1, 2}, {3, 4} };
+    char *strs[16];
+    char morestrs[32][32];
+
+    dumbdef(i) const int i; {}
+    int decla(i);
+    int *defb(f, j, k) float f; int k; int j; {}
+    int defc(float f) {}
+    int fnd(i);
+    int fnd(i) {}
+    rudedef(int (*bdc)(i)) {}
+    int empty_param_def() {}
+'''
+FPTRS = '''
+    void (*p)(void);
+    void (*fptrs[4])(void);
+'''
+# bad decls (but pycparser will accept them):
+    int arr_fn[4](int i);
+    int arr_fn(int i)[4];
+
+tree libraries
+==============
+bintrees
+rbtree
+blackjack
+viridis
+pybst
+pyavl
+banyan
+
+various translation concerns
+============================
+
+#include <math.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+
+/* how to do trunc_w_d */
+
+typedef union reg {
+    int32_t i32;
+    float s;
+    double d;
+} reg;
+
+int32_t
+trunc_w_d(double x)
+{
+    double r = trunc(x);
+    if (r > INT32_MAX || r < INT32_MIN)
+        return INT32_MAX;
+    else
+        return r;
+}
+
+int
+main(void)
+{
+    reg r;
+    int x = 10;
+
+    r.s = x;
+    r.d = floor(r.s);
+    r.i32 = trunc_w_d(r.d);
+    memcpy(&x, &r, 4);
+    printf("%d\n", x);
+
+    return 0;
+}
+
+/* ===== */
+
+#if 0
+#include <string.h>
+#include <stdint.h>
+#include <stdio.h>
+
+/* this is how we will deal with swc1/lwc1 etc. */
+
+int
+main(void)
+{
+    union { uint64_t i; float s; double d; } x;
+    uint64_t r, *p = (uint64_t *)&r;
+    float f;
+
+    x.d = -0.1;
+    x.s = x.d; /* cvt.s.d */
+    r = x.i; /* mfc1 */
+    memcpy(&f, &x, 4); /* swc1 */
+    // XXX but this breaks strict aliasing!
+    printf("%#x %f %f\n", r, *(float *)&r, f);
+
+    return 0;
+}
+#endif
+
+/* ===== */
+
+#if 0
+#include <stdint.h>
+#include <stdio.h>
+
+/*
+ * sadly, casting a function pointer to a data pointer is considered undefined
+ * behavior (though it will work on most systems)--we must avoid using it
+ */
+
+int
+main(void)
+{
+    uintptr_t putty = (uintptr_t)puts;
+
+    ((int (*)(const char *))putty)("hi");
+    return 0;
+}
+#endif
